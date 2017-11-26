@@ -2,6 +2,7 @@ package edu.coursera.distributed;
 
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.function.Function;
@@ -54,36 +55,26 @@ public final class PageRank {
     public static JavaPairRDD<Integer, Double> sparkPageRank(
             final JavaPairRDD<Integer, Website> sites,
             final JavaPairRDD<Integer, Double> ranks) {
-        //sites.distinct().groupByKey().cache();
-        
-        JavaPairRDD<Integer, Double> mappedValues = sites.join(ranks).flatMapToPair(new PairFlatMapFunction<Tuple2<Integer, Tuple2<Website, Double>>, Integer, Double>() {
+        final JavaPairRDD<Integer, Double> mapRanks;
+        final JavaPairRDD<Integer, Double> reduceRanks;
+        mapRanks = sites.join(ranks).flatMapToPair(new PairFlatMapFunction<Tuple2<Integer, Tuple2<Website, Double>>, Integer, Double>() {
             @Override
-            public Iterable<Tuple2<Integer, Double>> call(Tuple2<Integer, Tuple2<Website, Double>> keyValue) throws Exception {
-                Tuple2<Website, Double> website = keyValue._2();
-                Website siteEdges = website._1();
-                Double currentRank = website._2();
-                
-                List<Tuple2<Integer, Double>> contribs = new ArrayList<>(40);
-                Iterator<Integer> iterator = siteEdges.edgeIterator();
-                while (iterator.hasNext()) {
-                    final int target = iterator.next();
-                    contribs.add(new Tuple2(target, currentRank / (double) siteEdges.getNEdges()));
+            public Iterable<Tuple2<Integer, Double>> call(Tuple2<Integer, Tuple2<Website, Double>> keyValues) throws Exception {
+                final Website edges = keyValues._2()._1();
+                final Double currentRank = keyValues._2()._2();
+                final List<Tuple2<Integer, Double>> contributions = new ArrayList<>(40);
+                final Iterator<Integer> iter = edges.edgeIterator();
+                while (iter.hasNext()) {
+                    final int edge = iter.next();
+                    final double srcRank = currentRank / (double) edges.getNEdges();
+                    final Tuple2 mappedSrcRank = new Tuple2(edge, srcRank);
+                    contributions.add(mappedSrcRank);
                 }
-                return contribs;
+                return contributions;
             }
         });
-        JavaPairRDD<Integer, Double> resultedValues = mappedValues.reduceByKey(new Function2<Double, Double, Double>() {
-            @Override
-            public Double call(Double arg0, Double arg1) throws Exception {
-                return arg0 * arg1;
-            }
-        }).mapValues(new Function<Double, Double>() {
-            @Override
-            public Double call(Double y) throws Exception {
-                return 0.15 + 0.85 * y;
-            }
-        });
-        
-        return resultedValues;
+        reduceRanks = mapRanks.reduceByKey((Double r1, Double r2) -> r1 + r2).mapValues(y -> 0.15 + 0.85 * y);
+        return reduceRanks;
+
     }
 }
